@@ -64,7 +64,6 @@ impl Relay {
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
             .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
-            .with_quic()
             .with_other_transport(|key| {
                 Ok(webrtc::tokio::Transport::new(key.clone(), cert)
                     .map(|(peer_id, conn), _| (peer_id, StreamMuxerBox::new(conn))))

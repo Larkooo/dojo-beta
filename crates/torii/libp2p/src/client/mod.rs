@@ -69,7 +69,6 @@ impl RelayClient {
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
             .with_tcp(tcp::Config::default(), noise::Config::new, yamux::Config::default)?
-            .with_quic()
             .with_behaviour(|key| {
                 let gossipsub_config: gossipsub::Config = gossipsub::ConfigBuilder::default()
                     .heartbeat_interval(Duration::from_secs(
