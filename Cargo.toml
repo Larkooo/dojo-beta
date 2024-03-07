@@ -86,7 +86,6 @@ torii-graphql = { path = "crates/torii/graphql" }
 torii-grpc = { path = "crates/torii/grpc" }
 torii-relay = { path = "crates/torii/libp2p" }
 torii-server = { path = "crates/torii/server" }
-torii-relay = { path = "crates/torii/libp2p" }
 
 # saya
 saya-core = { path = "crates/saya/core" }
