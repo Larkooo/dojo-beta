@@ -1,5 +1,6 @@
 use cairo_lang_defs::patcher::RewriteNode;
 use cairo_lang_defs::plugin::PluginDiagnostic;
+use cairo_lang_diagnostics::Severity;
 use cairo_lang_syntax::node::ast::ItemStruct;
 use cairo_lang_syntax::node::db::SyntaxGroup;
 use cairo_lang_syntax::node::helpers::QueryAttrs;
@@ -40,6 +41,7 @@ pub fn handle_model_struct(
         diagnostics.push(PluginDiagnostic {
             message: "Model must define at least one #[key] attribute".into(),
             stable_ptr: struct_ast.name(db).stable_ptr().untyped(),
+            severity: Severity::Error,
         });
     }
 
@@ -47,6 +49,7 @@ pub fn handle_model_struct(
         diagnostics.push(PluginDiagnostic {
             message: "Model must define at least one member that is not a key".into(),
             stable_ptr: struct_ast.name(db).stable_ptr().untyped(),
+            severity: Severity::Error,
         });
     }
 
@@ -117,49 +120,50 @@ pub fn handle_model_struct(
             $schema_introspection$
 
             #[starknet::interface]
-            trait I$type_name$<T> {
-                fn name(self: @T) -> felt252;
+            trait I$contract_name$<T> {
+                fn ensure_abi(self: @T, model: $type_name$);
             }
 
             #[starknet::contract]
             mod $contract_name$ {
                 use super::$type_name$;
+                use super::I$contract_name$;
 
                 #[storage]
                 struct Storage {}
 
-                #[external(v0)]
-                fn name(self: @ContractState) -> felt252 {
-                    '$type_name$'
+                #[abi(embed_v0)]
+                impl DojoModelImpl of dojo::model::IDojoModel<ContractState>{
+                    fn name(self: @ContractState) -> felt252 {
+                        '$type_name$'
+                    }
+
+                    fn unpacked_size(self: @ContractState) -> usize {
+                        dojo::database::introspect::Introspect::<$type_name$>::size()
+                    }
+
+                    fn packed_size(self: @ContractState) -> usize {
+                        let mut layout = core::array::ArrayTrait::new();
+                        dojo::database::introspect::Introspect::<$type_name$>::layout(ref layout);
+                        let mut layout_span = layout.span();
+                        dojo::packing::calculate_packed_size(ref layout_span)
+                    }
+
+                    fn layout(self: @ContractState) -> Span<u8> {
+                        let mut layout = core::array::ArrayTrait::new();
+                        dojo::database::introspect::Introspect::<$type_name$>::layout(ref layout);
+                        core::array::ArrayTrait::span(@layout)
+                    }
+
+                    fn schema(self: @ContractState) -> dojo::database::introspect::Ty {
+                        dojo::database::introspect::Introspect::<$type_name$>::ty()
+                    }
                 }
 
-                #[external(v0)]
-                fn unpacked_size(self: @ContractState) -> usize {
-                    dojo::database::introspect::Introspect::<$type_name$>::size()
-                }
-
-                #[external(v0)]
-                fn packed_size(self: @ContractState) -> usize {
-                    let mut layout = core::array::ArrayTrait::new();
-                    dojo::database::introspect::Introspect::<$type_name$>::layout(ref layout);
-                    let mut layout_span = layout.span();
-                    dojo::packing::calculate_packed_size(ref layout_span)
-                }
-
-                #[external(v0)]
-                fn layout(self: @ContractState) -> Span<u8> {
-                    let mut layout = core::array::ArrayTrait::new();
-                    dojo::database::introspect::Introspect::<$type_name$>::layout(ref layout);
-                    core::array::ArrayTrait::span(@layout)
-                }
-
-                #[external(v0)]
-                fn schema(self: @ContractState) -> dojo::database::introspect::Ty {
-                    dojo::database::introspect::Introspect::<$type_name$>::ty()
-                }
-
-                #[external(v0)]
-                fn ensure_abi(self: @ContractState, model: $type_name$) {
+                #[abi(embed_v0)]
+                impl $contract_name$Impl of I$contract_name$<ContractState>{
+                    fn ensure_abi(self: @ContractState, model: $type_name$) {
+                    }
                 }
             }
         ",
@@ -169,7 +173,10 @@ pub fn handle_model_struct(
                     "type_name".to_string(),
                     RewriteNode::new_trimmed(struct_ast.name(db).as_syntax_node()),
                 ),
-                ("schema_introspection".to_string(), handle_introspect_struct(db, struct_ast)),
+                (
+                    "schema_introspection".to_string(),
+                    handle_introspect_struct(db, &mut diagnostics, struct_ast),
+                ),
                 ("serialized_keys".to_string(), RewriteNode::new_modified(serialized_keys)),
                 ("serialized_values".to_string(), RewriteNode::new_modified(serialized_values)),
             ]),

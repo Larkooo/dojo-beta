@@ -15,9 +15,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use clap::Parser;
+use common::parse::{parse_socket_address, parse_url};
 use dojo_world::contracts::world::WorldContractReader;
 use metrics::prometheus_exporter;
-use metrics::utils::parse_socket_address;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use starknet::core::types::FieldElement;
@@ -29,6 +29,7 @@ use tokio_stream::StreamExt;
 use torii_core::engine::{Engine, EngineConfig, Processors};
 use torii_core::processors::metadata_update::MetadataUpdateProcessor;
 use torii_core::processors::register_model::RegisterModelProcessor;
+use torii_core::processors::store_del_record::StoreDelRecordProcessor;
 use torii_core::processors::store_set_record::StoreSetRecordProcessor;
 use torii_core::processors::store_transaction::StoreTransactionProcessor;
 use torii_core::simple_broker::SimpleBroker;
@@ -37,7 +38,7 @@ use torii_core::types::Model;
 use torii_server::proxy::Proxy;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
-use url::Url;
+use url::{form_urlencoded, Url};
 
 /// Dojo World Indexer
 #[derive(Parser, Debug)]
@@ -48,8 +49,8 @@ struct Args {
     world_address: FieldElement,
 
     /// The sequencer rpc endpoint to index.
-    #[arg(long, value_name = "SOCKET", default_value = ":5050", value_parser = parse_socket_address)]
-    rpc: SocketAddr,
+    #[arg(long, value_name = "URL", default_value = ":5050", value_parser = parse_url)]
+    rpc: Url,
 
     /// Database filepath (ex: indexer.db). If specified file doesn't exist, it will be
     /// created. Defaults to in-memory database
@@ -61,7 +62,7 @@ struct Args {
     start_block: u64,
 
     /// Address to serve api endpoints at.
-    #[arg(long, value_name = "SOCKET", default_value = ":8080", value_parser = parse_socket_address)]
+    #[arg(long, value_name = "SOCKET", default_value = "0.0.0.0:8080", value_parser = parse_socket_address)]
     addr: SocketAddr,
 
     /// Port to serve Libp2p TCP & UDP Quic transports
@@ -129,11 +130,17 @@ async fn main() -> anyhow::Result<()> {
         .connect_with(options)
         .await?;
 
+    if args.database == ":memory:" {
+        // Disable auto-vacuum
+        sqlx::query("PRAGMA auto_vacuum = NONE;").execute(&pool).await?;
+
+        // Switch DELETE journal mode
+        sqlx::query("PRAGMA journal_mode=DELETE;").execute(&pool).await?;
+    }
+
     sqlx::migrate!("../../crates/torii/migrations").run(&pool).await?;
 
-    let provider: Arc<_> =
-        JsonRpcClient::new(HttpTransport::new(format!("http://{}", args.rpc).parse::<Url>()?))
-            .into();
+    let provider: Arc<_> = JsonRpcClient::new(HttpTransport::new(args.rpc)).into();
 
     // Get world address
     let world = WorldContractReader::new(args.world_address, &provider);
@@ -144,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
             Box::new(RegisterModelProcessor),
             Box::new(StoreSetRecordProcessor),
             Box::new(MetadataUpdateProcessor),
+            Box::new(StoreDelRecordProcessor),
         ],
         transaction: vec![Box::new(StoreTransactionProcessor)],
         ..Processors::default()
@@ -188,8 +196,14 @@ async fn main() -> anyhow::Result<()> {
     )
     .expect("Failed to start libp2p relay server");
 
-    info!(target: "torii::cli", "Starting torii endpoint: {}", format!("http://{}", args.addr));
-    info!(target: "torii::cli", "Serving Graphql playground: {}\n", format!("http://{}/graphql", args.addr));
+    let endpoint = format!("http://{}", args.addr);
+    let gql_endpoint = format!("{}/graphql", endpoint);
+    let encoded: String =
+        form_urlencoded::byte_serialize(gql_endpoint.replace("0.0.0.0", "localhost").as_bytes())
+            .collect();
+    info!(target: "torii::cli", "Starting torii endpoint: {}", endpoint);
+    info!(target: "torii::cli", "Serving Graphql playground: {}", gql_endpoint);
+    info!(target: "torii::cli", "World Explorer is available on: {}\n", format!("https://worlds.dev/torii?url={}", encoded));
 
     if let Some(listen_addr) = args.metrics {
         let prometheus_handle = prometheus_exporter::install_recorder("torii")?;

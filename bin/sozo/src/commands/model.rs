@@ -28,6 +28,18 @@ pub enum ModelCommands {
         starknet: StarknetOptions,
     },
 
+    #[command(about = "Retrieve the contract address of a model")]
+    ContractAddress {
+        #[arg(help = "The name of the model")]
+        name: String,
+
+        #[command(flatten)]
+        world: WorldOptions,
+
+        #[command(flatten)]
+        starknet: StarknetOptions,
+    },
+
     #[command(about = "Retrieve the schema for a model")]
     Schema {
         #[arg(help = "The name of the model")]
@@ -67,7 +79,6 @@ impl ModelArgs {
         let env_metadata = if config.manifest_path().exists() {
             let ws = scarb::ops::read_workspace(config.manifest_path(), config)?;
 
-            // TODO: Check the updated scarb way to read profile specific values
             dojo_metadata_from_workspace(&ws).and_then(|inner| inner.env().cloned())
         } else {
             None

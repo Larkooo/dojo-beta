@@ -43,7 +43,7 @@ impl TestSequencer {
                 port: 0,
                 host: "127.0.0.1".into(),
                 max_connections: 100,
-                apis: vec![ApiKind::Starknet, ApiKind::Katana],
+                apis: vec![ApiKind::Starknet, ApiKind::Katana, ApiKind::Torii, ApiKind::Dev],
             },
         )
         .await
@@ -51,9 +51,11 @@ impl TestSequencer {
 
         let url = Url::parse(&format!("http://{}", handle.addr)).expect("Failed to parse URL");
 
-        let account = sequencer.backend.accounts[0].clone();
-        let account =
-            TestAccount { private_key: account.private_key, account_address: account.address };
+        let account = sequencer.backend.config.genesis.accounts().next().unwrap();
+        let account = TestAccount {
+            private_key: account.1.private_key().unwrap(),
+            account_address: (*account.0).into(),
+        };
 
         TestSequencer { sequencer, account, handle, url }
     }

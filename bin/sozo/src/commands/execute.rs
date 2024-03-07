@@ -7,6 +7,7 @@ use starknet::core::types::FieldElement;
 use super::options::account::AccountOptions;
 use super::options::starknet::StarknetOptions;
 use super::options::transaction::TransactionOptions;
+use super::options::world::WorldOptions;
 use crate::ops::execute;
 
 #[derive(Debug, Args)]
@@ -32,6 +33,9 @@ pub struct ExecuteArgs {
     pub account: AccountOptions,
 
     #[command(flatten)]
+    pub world: WorldOptions,
+
+    #[command(flatten)]
     pub transaction: TransactionOptions,
 }
 
@@ -40,7 +44,6 @@ impl ExecuteArgs {
         let env_metadata = if config.manifest_path().exists() {
             let ws = scarb::ops::read_workspace(config.manifest_path(), config)?;
 
-            // TODO: Check the updated scarb way to read profile specific values
             dojo_metadata_from_workspace(&ws).and_then(|inner| inner.env().cloned())
         } else {
             None

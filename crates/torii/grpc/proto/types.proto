@@ -29,6 +29,8 @@ message ModelMetadata {
     bytes layout = 5;
     // The schema of the component serialized in bytes (for simplicity sake)
     bytes schema = 6;
+    // hex-encoded contract address of the component
+    string contract_address = 7;
 }
 
 message Model {
@@ -41,6 +43,15 @@ message Entity {
     bytes hashed_keys = 1;
     // Models of the entity
     repeated Model models = 2;
+}
+
+message Event {
+    // The event's keys
+    repeated bytes keys = 1;
+    // Data of the event
+    repeated bytes data = 2;
+    // event's transaction hash
+    bytes transaction_hash = 3;
 }
 
 message StorageEntry {
@@ -73,6 +84,12 @@ message Query {
     uint32 offset = 3;
 }
 
+message EventQuery {
+    EventKeysClause keys =1;
+    uint32 limit = 2;
+    uint32 offset = 3;
+}
+
 message Clause {
     oneof clause_type {
         HashedKeysClause hashed_keys = 1;
@@ -84,6 +101,10 @@ message Clause {
 
 message HashedKeysClause {
     repeated bytes hashed_keys = 1;
+}
+
+message EventKeysClause {
+    repeated bytes keys = 1;
 }
 
 message KeysClause {

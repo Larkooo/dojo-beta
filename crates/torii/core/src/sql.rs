@@ -8,7 +8,7 @@ use dojo_types::schema::Ty;
 use dojo_world::metadata::WorldMetadata;
 use sqlx::pool::PoolConnection;
 use sqlx::{Pool, Sqlite};
-use starknet::core::types::{Event, FieldElement, InvokeTransactionV1};
+use starknet::core::types::{Event, FieldElement, InvokeTransaction, Transaction};
 use starknet_crypto::poseidon_hash_many;
 
 use super::World;
@@ -79,6 +79,7 @@ impl Sql {
         model: Ty,
         layout: Vec<FieldElement>,
         class_hash: FieldElement,
+        contract_address: FieldElement,
         packed_size: u32,
         unpacked_size: u32,
     ) -> Result<()> {
@@ -87,15 +88,17 @@ impl Sql {
             .map(|x| <FieldElement as TryInto<u8>>::try_into(*x).unwrap())
             .collect::<Vec<u8>>();
 
-        let insert_models = "INSERT INTO models (id, name, class_hash, layout, packed_size, \
-                             unpacked_size) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE \
-                             SET class_hash=EXCLUDED.class_hash, layout=EXCLUDED.layout, \
-                             packed_size=EXCLUDED.packed_size, \
-                             unpacked_size=EXCLUDED.unpacked_size RETURNING *";
+        let insert_models =
+            "INSERT INTO models (id, name, class_hash, contract_address, layout, packed_size, \
+             unpacked_size) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \
+             contract_address=EXCLUDED.contract_address, class_hash=EXCLUDED.class_hash, \
+             layout=EXCLUDED.layout, packed_size=EXCLUDED.packed_size, \
+             unpacked_size=EXCLUDED.unpacked_size RETURNING *";
         let model_registered: ModelRegistered = sqlx::query_as(insert_models)
             .bind(model.name())
             .bind(model.name())
             .bind(format!("{class_hash:#x}"))
+            .bind(format!("{contract_address:#x}"))
             .bind(hex::encode(&layout_blob))
             .bind(packed_size)
             .bind(unpacked_size)
@@ -149,11 +152,12 @@ impl Sql {
         Ok(())
     }
 
-    pub fn delete_entity(&mut self, model: String, key: FieldElement) {
-        let model = Argument::String(model);
-        let id = Argument::FieldElement(key);
-
-        self.query_queue.enqueue("DELETE FROM ? WHERE id = ?", vec![model, id]);
+    pub async fn delete_entity(&mut self, keys: Vec<FieldElement>, entity: Ty) -> Result<()> {
+        let entity_id = format!("{:#x}", poseidon_hash_many(&keys));
+        let path = vec![entity.name()];
+        self.build_delete_entity_queries_recursive(path, &entity_id, &entity);
+        self.query_queue.execute_all().await?;
+        Ok(())
     }
 
     pub fn set_metadata(&mut self, resource: &FieldElement, uri: &str) {
@@ -234,19 +238,49 @@ impl Sql {
         Ok(rows.drain(..).map(|row| serde_json::from_str(&row.2).unwrap()).collect())
     }
 
-    pub fn store_transaction(&mut self, transaction: &InvokeTransactionV1, transaction_id: &str) {
+    pub fn store_transaction(&mut self, transaction: &Transaction, transaction_id: &str) {
         let id = Argument::String(transaction_id.to_string());
-        let transaction_hash = Argument::FieldElement(transaction.transaction_hash);
-        let sender_address = Argument::FieldElement(transaction.sender_address);
-        let calldata = Argument::String(felts_sql_string(&transaction.calldata));
-        let max_fee = Argument::FieldElement(transaction.max_fee);
-        let signature = Argument::String(felts_sql_string(&transaction.signature));
-        let nonce = Argument::FieldElement(transaction.nonce);
+
+        let transaction_type = match transaction {
+            Transaction::Invoke(_) => "INVOKE",
+            Transaction::L1Handler(_) => "L1_HANDLER",
+            _ => return,
+        };
+
+        let (transaction_hash, sender_address, calldata, max_fee, signature, nonce) =
+            match transaction {
+                Transaction::Invoke(InvokeTransaction::V1(invoke_v1_transaction)) => (
+                    Argument::FieldElement(invoke_v1_transaction.transaction_hash),
+                    Argument::FieldElement(invoke_v1_transaction.sender_address),
+                    Argument::String(felts_sql_string(&invoke_v1_transaction.calldata)),
+                    Argument::FieldElement(invoke_v1_transaction.max_fee),
+                    Argument::String(felts_sql_string(&invoke_v1_transaction.signature)),
+                    Argument::FieldElement(invoke_v1_transaction.nonce),
+                ),
+                Transaction::L1Handler(l1_handler_transaction) => (
+                    Argument::FieldElement(l1_handler_transaction.transaction_hash),
+                    Argument::FieldElement(l1_handler_transaction.contract_address),
+                    Argument::String(felts_sql_string(&l1_handler_transaction.calldata)),
+                    Argument::FieldElement(FieldElement::ZERO), // has no max_fee
+                    Argument::String("".to_string()),           // has no signature
+                    Argument::FieldElement((l1_handler_transaction.nonce).into()),
+                ),
+                _ => return,
+            };
 
         self.query_queue.enqueue(
             "INSERT OR IGNORE INTO transactions (id, transaction_hash, sender_address, calldata, \
-             max_fee, signature, nonce) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            vec![id, transaction_hash, sender_address, calldata, max_fee, signature, nonce],
+             max_fee, signature, nonce, transaction_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            vec![
+                id,
+                transaction_hash,
+                sender_address,
+                calldata,
+                max_fee,
+                signature,
+                nonce,
+                Argument::String(transaction_type.to_string()),
+            ],
         );
     }
 
@@ -344,7 +378,6 @@ impl Sql {
                     if let Ty::Struct(_) = &member.ty {
                         let mut path_clone = path.clone();
                         path_clone.push(member.name.clone());
-
                         self.build_set_entity_queries_recursive(
                             path_clone, event_id, entity_id, &member.ty,
                         );
@@ -358,6 +391,39 @@ impl Sql {
                     self.build_set_entity_queries_recursive(
                         path_clone, event_id, entity_id, &child.ty,
                     );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn build_delete_entity_queries_recursive(
+        &mut self,
+        path: Vec<String>,
+        entity_id: &str,
+        entity: &Ty,
+    ) {
+        match entity {
+            Ty::Struct(s) => {
+                let table_id = path.join("$");
+                let statement = format!("DELETE FROM [{table_id}] WHERE entity_id = ?");
+                self.query_queue
+                    .push_front(statement, vec![Argument::String(entity_id.to_string())]);
+                for member in s.children.iter() {
+                    if let Ty::Struct(_) = &member.ty {
+                        let mut path_clone = path.clone();
+                        path_clone.push(member.name.clone());
+                        self.build_delete_entity_queries_recursive(
+                            path_clone, entity_id, &member.ty,
+                        );
+                    }
+                }
+            }
+            Ty::Enum(e) => {
+                for child in e.options.iter() {
+                    let mut path_clone = path.clone();
+                    path_clone.push(child.name.clone());
+                    self.build_delete_entity_queries_recursive(path_clone, entity_id, &child.ty);
                 }
             }
             _ => {}

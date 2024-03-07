@@ -10,7 +10,7 @@ use dojo_test_utils::sequencer::{
 use dojo_types::primitive::Primitive;
 use dojo_types::schema::{Enum, EnumOption, Member, Struct, Ty};
 use dojo_world::contracts::WorldContractReader;
-use dojo_world::manifest::Manifest;
+use dojo_world::manifest::DeployedManifest;
 use dojo_world::utils::TransactionWaiter;
 use scarb::ops;
 use serde::Deserialize;
@@ -27,6 +27,7 @@ use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use torii_core::engine::{Engine, EngineConfig, Processors};
 use torii_core::processors::register_model::RegisterModelProcessor;
+use torii_core::processors::store_del_record::StoreDelRecordProcessor;
 use torii_core::processors::store_set_record::StoreSetRecordProcessor;
 use torii_core::sql::Sql;
 
@@ -88,7 +89,7 @@ pub struct Record {
     pub type_u8: u8,
     pub type_u16: u16,
     pub type_u32: u32,
-    pub type_u64: u64,
+    pub type_u64: String,
     pub type_u128: String,
     pub type_u256: String,
     pub type_bool: bool,
@@ -135,6 +136,14 @@ pub struct Subrecord {
     pub record_id: u32,
     pub subrecord_id: u32,
     pub type_u8: u8,
+    pub random_u8: u8,
+    pub entity: Option<Entity>,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+pub struct RecordSibling {
+    pub __typename: String,
+    pub record_id: u32,
     pub random_u8: u8,
     pub entity: Option<Entity>,
 }
@@ -237,6 +246,7 @@ pub async fn model_fixtures(db: &mut Sql) {
         }),
         vec![],
         FieldElement::ONE,
+        FieldElement::TWO,
         0,
         0,
     )
@@ -250,7 +260,9 @@ pub async fn spinup_types_test() -> Result<SqlitePool> {
     let pool = SqlitePoolOptions::new().max_connections(5).connect_with(options).await.unwrap();
     sqlx::migrate!("../migrations").run(&pool).await.unwrap();
 
-    let migration = prepare_migration("../types-test/target/dev".into()).unwrap();
+    let base_path = "../types-test";
+    let target_path = format!("{}/target/dev", base_path);
+    let migration = prepare_migration(base_path.into(), target_path.into()).unwrap();
     let config = build_test_config("../types-test/Scarb.toml").unwrap();
     let mut db = Sql::new(pool.clone(), migration.world_address().unwrap()).await.unwrap();
 
@@ -268,16 +280,32 @@ pub async fn spinup_types_test() -> Result<SqlitePool> {
     execute_strategy(&ws, &migration, &account, None).await.unwrap();
 
     let manifest =
-        Manifest::load_from_remote(&provider, migration.world_address().unwrap()).await.unwrap();
+        DeployedManifest::load_from_remote(&provider, migration.world_address().unwrap())
+            .await
+            .unwrap();
 
-    //  Execute `create` and insert 10 records into storage
+    //  Execute `create` and insert 11 records into storage
     let records_contract =
         manifest.contracts.iter().find(|contract| contract.name.eq("records")).unwrap();
+    let record_contract_address = records_contract.inner.address.unwrap();
     let InvokeTransactionResult { transaction_hash } = account
         .execute(vec![Call {
             calldata: vec![FieldElement::from_str("0xa").unwrap()],
-            to: records_contract.address.unwrap(),
+            to: record_contract_address,
             selector: selector!("create"),
+        }])
+        .send()
+        .await
+        .unwrap();
+
+    TransactionWaiter::new(transaction_hash, &provider).await?;
+
+    // Execute `delete` and delete Record with id 20
+    let InvokeTransactionResult { transaction_hash } = account
+        .execute(vec![Call {
+            calldata: vec![FieldElement::from_str("0x14").unwrap()],
+            to: record_contract_address,
+            selector: selector!("delete"),
         }])
         .send()
         .await
@@ -291,7 +319,11 @@ pub async fn spinup_types_test() -> Result<SqlitePool> {
         &mut db,
         &provider,
         Processors {
-            event: vec![Box::new(RegisterModelProcessor), Box::new(StoreSetRecordProcessor)],
+            event: vec![
+                Box::new(RegisterModelProcessor),
+                Box::new(StoreSetRecordProcessor),
+                Box::new(StoreDelRecordProcessor),
+            ],
             ..Processors::default()
         },
         EngineConfig::default(),

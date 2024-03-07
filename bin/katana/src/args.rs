@@ -15,18 +15,25 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
+use common::parse::parse_socket_address;
 use katana_core::backend::config::{Environment, StarknetConfig};
 use katana_core::constants::{
-    DEFAULT_GAS_PRICE, DEFAULT_INVOKE_MAX_STEPS, DEFAULT_VALIDATE_MAX_STEPS,
+    DEFAULT_ETH_L1_GAS_PRICE, DEFAULT_INVOKE_MAX_STEPS, DEFAULT_SEQUENCER_ADDRESS,
+    DEFAULT_STRK_L1_GAS_PRICE, DEFAULT_VALIDATE_MAX_STEPS,
 };
 use katana_core::sequencer::SequencerConfig;
+use katana_primitives::block::GasPrices;
 use katana_primitives::chain::ChainId;
+use katana_primitives::genesis::allocation::DevAllocationsGenerator;
+use katana_primitives::genesis::constant::DEFAULT_PREFUNDED_ACCOUNT_BALANCE;
+use katana_primitives::genesis::Genesis;
 use katana_rpc::config::ServerConfig;
 use katana_rpc_api::ApiKind;
-use metrics::utils::parse_socket_address;
 use tracing::Subscriber;
 use tracing_subscriber::{fmt, EnvFilter};
 use url::Url;
+
+use crate::utils::{parse_genesis, parse_seed};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -85,7 +92,7 @@ pub struct KatanaArgs {
     #[arg(help = "Configure the messaging with an other chain.")]
     #[arg(long_help = "Configure the messaging to allow Katana listening/sending messages on a \
                        settlement chain that can be Ethereum or an other Starknet sequencer. \
-                       The configuration file details and examples can be found here: https://book.dojoengine.org/toolchain/katana/reference.html#messaging")]
+                       The configuration file details and examples can be found here: https://book.dojoengine.org/toolchain/katana/reference#messaging")]
     pub messaging: Option<katana_core::service::messaging::MessagingConfig>,
 
     #[command(flatten)]
@@ -134,7 +141,7 @@ pub struct StarknetOptions {
     #[arg(value_name = "NUM")]
     #[arg(default_value = "10")]
     #[arg(help = "Number of pre-funded accounts to generate.")]
-    pub total_accounts: u8,
+    pub total_accounts: u16,
 
     #[arg(long)]
     #[arg(help = "Disable charging fee when executing transactions.")]
@@ -147,6 +154,11 @@ pub struct StarknetOptions {
     #[command(flatten)]
     #[command(next_help_heading = "Environment options")]
     pub environment: EnvironmentOptions,
+
+    #[arg(long)]
+    #[arg(value_parser = parse_genesis)]
+    #[arg(conflicts_with_all(["rpc_url", "seed", "total_accounts"]))]
+    pub genesis: Option<Genesis>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -161,23 +173,27 @@ pub struct EnvironmentOptions {
     pub chain_id: ChainId,
 
     #[arg(long)]
-    #[arg(help = "The gas price.")]
-    pub gas_price: Option<u64>,
-
-    #[arg(long)]
     #[arg(help = "The maximum number of steps available for the account validation logic.")]
     pub validate_max_steps: Option<u32>,
 
     #[arg(long)]
     #[arg(help = "The maximum number of steps available for the account execution logic.")]
     pub invoke_max_steps: Option<u32>,
+
+    #[arg(long = "eth-gas-price")]
+    #[arg(help = "The L1 ETH gas price.")]
+    pub l1_eth_gas_price: Option<u128>,
+
+    #[arg(long = "strk-gas-price")]
+    #[arg(help = "The L1 STRK gas price.")]
+    pub l1_strk_gas_price: Option<u128>,
 }
 
 impl KatanaArgs {
     pub fn init_logging(&self) -> Result<(), Box<dyn std::error::Error>> {
         const DEFAULT_LOG_FILTER: &str = "info,executor=trace,forked_backend=trace,server=debug,\
                                           katana_core=trace,blockifier=off,jsonrpsee_server=off,\
-                                          hyper=off,messaging=debug";
+                                          hyper=off,messaging=debug,node=error";
 
         let builder = fmt::Subscriber::builder().with_env_filter(
             EnvFilter::try_from_default_env().or(EnvFilter::try_new(DEFAULT_LOG_FILTER))?,
@@ -202,10 +218,10 @@ impl KatanaArgs {
     }
 
     pub fn server_config(&self) -> ServerConfig {
-        let mut apis = vec![ApiKind::Starknet];
+        let mut apis = vec![ApiKind::Starknet, ApiKind::Katana, ApiKind::Torii];
         // only enable `katana` API in dev mode
         if self.dev {
-            apis.push(ApiKind::Katana);
+            apis.push(ApiKind::Dev);
         }
 
         ServerConfig {
@@ -217,16 +233,38 @@ impl KatanaArgs {
     }
 
     pub fn starknet_config(&self) -> StarknetConfig {
+        let gas_price = GasPrices {
+            eth: self.starknet.environment.l1_eth_gas_price.unwrap_or(DEFAULT_ETH_L1_GAS_PRICE),
+            strk: self.starknet.environment.l1_strk_gas_price.unwrap_or(DEFAULT_STRK_L1_GAS_PRICE),
+        };
+
+        let genesis = match self.starknet.genesis.clone() {
+            Some(genesis) => genesis,
+            None => {
+                let accounts = DevAllocationsGenerator::new(self.starknet.total_accounts)
+                    .with_seed(parse_seed(&self.starknet.seed))
+                    .with_balance(DEFAULT_PREFUNDED_ACCOUNT_BALANCE)
+                    .generate();
+
+                let mut genesis = Genesis {
+                    gas_prices: gas_price.clone(),
+                    sequencer_address: *DEFAULT_SEQUENCER_ADDRESS,
+                    ..Default::default()
+                };
+
+                genesis.extend_allocations(accounts.into_iter().map(|(k, v)| (k, v.into())));
+                genesis
+            }
+        };
+
         StarknetConfig {
-            total_accounts: self.starknet.total_accounts,
-            seed: parse_seed(&self.starknet.seed),
             disable_fee: self.starknet.disable_fee,
             disable_validate: self.starknet.disable_validate,
             fork_rpc_url: self.rpc_url.clone(),
             fork_block_number: self.fork_block_number,
             env: Environment {
+                gas_price,
                 chain_id: self.starknet.environment.chain_id,
-                gas_price: self.starknet.environment.gas_price.unwrap_or(DEFAULT_GAS_PRICE),
                 invoke_max_steps: self
                     .starknet
                     .environment
@@ -239,19 +277,8 @@ impl KatanaArgs {
                     .unwrap_or(DEFAULT_VALIDATE_MAX_STEPS),
             },
             db_dir: self.db_dir.clone(),
+            genesis,
         }
-    }
-}
-
-fn parse_seed(seed: &str) -> [u8; 32] {
-    let seed = seed.as_bytes();
-
-    if seed.len() >= 32 {
-        unsafe { *(seed[..32].as_ptr() as *const [u8; 32]) }
-    } else {
-        let mut actual_seed = [0u8; 32];
-        seed.iter().enumerate().for_each(|(i, b)| actual_seed[i] = *b);
-        actual_seed
     }
 }
 
@@ -263,15 +290,18 @@ mod test {
     fn default_block_context_from_args() {
         let args = KatanaArgs::parse_from(["katana"]);
         let block_context = args.starknet_config().block_env();
-        assert_eq!(block_context.l1_gas_prices.eth, DEFAULT_GAS_PRICE);
+        assert_eq!(block_context.l1_gas_prices.eth, DEFAULT_ETH_L1_GAS_PRICE);
+        assert_eq!(block_context.l1_gas_prices.strk, DEFAULT_STRK_L1_GAS_PRICE);
     }
 
     #[test]
     fn custom_block_context_from_args() {
         let args = KatanaArgs::parse_from([
             "katana",
-            "--gas-price",
+            "--eth-gas-price",
             "10",
+            "--strk-gas-price",
+            "20",
             "--chain-id",
             "SN_GOERLI",
             "--validate-max-steps",
@@ -283,5 +313,6 @@ mod test {
         let block_context = args.starknet_config().block_env();
 
         assert_eq!(block_context.l1_gas_prices.eth, 10);
+        assert_eq!(block_context.l1_gas_prices.strk, 20);
     }
 }

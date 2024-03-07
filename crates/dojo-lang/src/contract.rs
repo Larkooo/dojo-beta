@@ -32,12 +32,12 @@ impl DojoContract {
                 .elements(db)
                 .iter()
                 .flat_map(|el| {
-                    if let ast::Item::Enum(enum_ast) = el {
+                    if let ast::ModuleItem::Enum(enum_ast) = el {
                         if enum_ast.name(db).text(db).to_string() == "Event" {
                             has_event = true;
                             return system.merge_event(db, enum_ast.clone());
                         }
-                    } else if let ast::Item::Struct(struct_ast) = el {
+                    } else if let ast::ModuleItem::Struct(struct_ast) = el {
                         if struct_ast.name(db).text(db).to_string() == "Storage" {
                             has_storage = true;
                             return system.merge_storage(db, struct_ast.clone());
@@ -65,16 +65,19 @@ impl DojoContract {
                     use dojo::world::IWorldDispatcher;
                     use dojo::world::IWorldDispatcherTrait;
                     use dojo::world::IWorldProvider;
+                    use dojo::world::IDojoResourceProvider;
                    
                     component!(path: dojo::components::upgradeable::upgradeable, storage: \
                  upgradeable, event: UpgradeableEvent);
 
-                    #[external(v0)]
-                    fn dojo_resource(self: @ContractState) -> felt252 {
-                        '$name$'
+                    #[abi(embed_v0)]
+                    impl DojoResourceProviderImpl of IDojoResourceProvider<ContractState> {
+                        fn dojo_resource(self: @ContractState) -> felt252 {
+                            '$name$'
+                        }
                     }
 
-                    #[external(v0)]
+                    #[abi(embed_v0)]
                     impl WorldProviderImpl of IWorldProvider<ContractState> {
                         fn world(self: @ContractState) -> IWorldDispatcher {
                             self.world_dispatcher.read()
@@ -105,7 +108,7 @@ impl DojoContract {
                             dependencies: system.dependencies.values().cloned().collect(),
                         }],
                     })),
-                    diagnostics_mappings: builder.diagnostics_mappings,
+                    code_mappings: builder.code_mappings,
                 }),
                 diagnostics: system.diagnostics,
                 remove_original_item: true,

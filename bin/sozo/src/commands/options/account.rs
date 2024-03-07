@@ -9,7 +9,8 @@ use starknet::providers::Provider;
 use starknet::signers::{LocalWallet, SigningKey};
 
 use super::{
-    DOJO_ACCOUNT_ADDRESS_ENV_VAR, DOJO_KEYSTORE_PASSWORD_ENV_VAR, DOJO_PRIVATE_KEY_ENV_VAR,
+    DOJO_ACCOUNT_ADDRESS_ENV_VAR, DOJO_KEYSTORE_PASSWORD_ENV_VAR, DOJO_KEYSTORE_PATH_ENV_VAR,
+    DOJO_PRIVATE_KEY_ENV_VAR,
 };
 
 #[derive(Debug, Args)]
@@ -29,7 +30,7 @@ pub struct AccountOptions {
     #[arg(help = "The raw private key associated with the account contract.")]
     pub private_key: Option<String>,
 
-    #[arg(long = "keystore")]
+    #[arg(long = "keystore", env = DOJO_KEYSTORE_PATH_ENV_VAR)]
     #[arg(value_name = "PATH")]
     #[arg(help_heading = "Signer options - KEYSTORE")]
     #[arg(help = "Use the keystore in the given folder or file.")]
@@ -118,7 +119,6 @@ mod tests {
     use std::str::FromStr;
 
     use clap::Parser;
-    use katana_runner::KatanaRunner;
     use starknet::accounts::{Call, ExecutionEncoder};
     use starknet::signers::{LocalWallet, Signer, SigningKey};
     use starknet_crypto::FieldElement;
@@ -160,11 +160,9 @@ mod tests {
 
     #[test]
     fn account_address_from_args() {
-        let env_metadata = dojo_world::metadata::Environment::default();
-
         let cmd = Command::parse_from(["sozo", "--account-address", "0x0"]);
         assert_eq!(
-            cmd.account.account_address(Some(&env_metadata)).unwrap(),
+            cmd.account.account_address(None).unwrap(),
             FieldElement::from_hex_be("0x0").unwrap()
         );
     }
@@ -199,20 +197,17 @@ mod tests {
 
     #[test]
     fn account_address_from_neither() {
-        let env_metadata = dojo_world::metadata::Environment::default();
-
         let cmd = Command::parse_from([""]);
-        assert!(cmd.account.account_address(Some(&env_metadata)).is_err());
+        assert!(cmd.account.account_address(None).is_err());
     }
 
     #[tokio::test]
     async fn private_key_from_args() {
-        let env_metadata = dojo_world::metadata::Environment::default();
         let private_key = "0x1";
 
         let cmd =
             Command::parse_from(["sozo", "--account-address", "0x0", "--private-key", private_key]);
-        let result_wallet = cmd.account.signer(Some(&env_metadata)).unwrap();
+        let result_wallet = cmd.account.signer(None).unwrap();
         let expected_wallet = LocalWallet::from_signing_key(SigningKey::from_secret_scalar(
             FieldElement::from_str(private_key).unwrap(),
         ));
@@ -246,7 +241,6 @@ mod tests {
         let keystore_path = "./tests/test_data/keystore/test.json";
         let keystore_password = "dojoftw";
         let private_key = "0x1";
-        let env_metadata = dojo_world::metadata::Environment::default();
 
         let cmd = Command::parse_from([
             "sozo",
@@ -255,7 +249,7 @@ mod tests {
             "--password",
             keystore_password,
         ]);
-        let result_wallet = cmd.account.signer(Some(&env_metadata)).unwrap();
+        let result_wallet = cmd.account.signer(None).unwrap();
         let expected_wallet = LocalWallet::from_signing_key(SigningKey::from_secret_scalar(
             FieldElement::from_str(private_key).unwrap(),
         ));
@@ -313,19 +307,17 @@ mod tests {
     fn dont_allow_both_private_key_and_keystore() {
         let keystore_path = "./tests/test_data/keystore/test.json";
         let private_key = "0x1";
-        assert!(
-            Command::try_parse_from([
-                "sozo",
-                "--keystore",
-                keystore_path,
-                "--private_key",
-                private_key,
-            ])
-            .is_err()
-        );
+        let parse_result = Command::try_parse_from([
+            "sozo",
+            "--keystore",
+            keystore_path,
+            "--private_key",
+            private_key,
+        ]);
+        assert!(parse_result.is_err());
     }
 
-    #[tokio::test]
+    #[katana_runner::katana_test(2, true, "katana", "")]
     async fn legacy_flag_works_as_expected() {
         let cmd = Command::parse_from([
             "sozo",
@@ -335,7 +327,6 @@ mod tests {
             "--private-key",
             "0x1",
         ]);
-        let (_runner, provider) = KatanaRunner::new().unwrap();
         let dummy_call = vec![Call {
             to: FieldElement::from_hex_be("0x0").unwrap(),
             selector: FieldElement::from_hex_be("0x1").unwrap(),
@@ -347,16 +338,15 @@ mod tests {
 
         // HACK: SingleOwnerAccount doesn't expose a way to check `encoding` type used in struct, so
         // checking it by encoding a dummy call and checking which method it used to encode the call
-        let account = cmd.account.account(provider, None).await.unwrap();
+        let account = cmd.account.account(runner.provider(), None).await.unwrap();
         let result = account.encode_calls(&dummy_call);
         // 0x0 is the data offset.
         assert!(*result.get(3).unwrap() == FieldElement::from_hex_be("0x0").unwrap());
     }
 
-    #[tokio::test]
+    #[katana_runner::katana_test(2, true, "katana", "")]
     async fn without_legacy_flag_works_as_expected() {
         let cmd = Command::parse_from(["sozo", "--account-address", "0x0", "--private-key", "0x1"]);
-        let (_runner, provider) = KatanaRunner::new().unwrap();
         let dummy_call = vec![Call {
             to: FieldElement::from_hex_be("0x0").unwrap(),
             selector: FieldElement::from_hex_be("0x1").unwrap(),
@@ -368,9 +358,27 @@ mod tests {
 
         // HACK: SingleOwnerAccount doesn't expose a way to check `encoding` type used in struct, so
         // checking it by encoding a dummy call and checking which method it used to encode the call
-        let account = cmd.account.account(provider, None).await.unwrap();
+        let account = cmd.account.account(runner.provider(), None).await.unwrap();
         let result = account.encode_calls(&dummy_call);
         // 0x2 is the Calldata len.
         assert!(*result.get(3).unwrap() == FieldElement::from_hex_be("0x2").unwrap());
+    }
+
+    #[test]
+    fn keystore_path_without_keystore_password() {
+        let keystore_path = "./tests/test_data/keystore/test.json";
+
+        let cmd = Command::parse_from(["sozo", "--keystore", keystore_path]);
+        let result = cmd.account.signer(None);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn signer_without_pk_or_keystore() {
+        let cmd = Command::parse_from(["sozo"]);
+        let result = cmd.account.signer(None);
+
+        assert!(result.is_err());
     }
 }

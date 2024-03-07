@@ -17,9 +17,10 @@ async fn test_model() {
         TestSequencer::start(SequencerConfig::default(), get_default_test_starknet_config()).await;
     let account = sequencer.account();
     let provider = account.provider();
-    let (world_address, _) = deploy_world(
+    let world_address = deploy_world(
         &sequencer,
-        Utf8PathBuf::from_path_buf("../../examples/spawn-and-move/target/dev".into()).unwrap(),
+        &Utf8PathBuf::from_path_buf("../../examples/spawn-and-move".into()).unwrap(),
+        &Utf8PathBuf::from_path_buf("../../examples/spawn-and-move/target/dev".into()).unwrap(),
     )
     .await;
 
@@ -63,7 +64,7 @@ async fn test_model() {
     assert_eq!(
         position.class_hash(),
         FieldElement::from_hex_be(
-            "0x02a7df852d6ef0af662dad741b97b423ba0fb34a1483599781ac9e7f6822bc25"
+            "0x00b33ae053213ccb2a57967ffc4411901f3efab24781ca867adcd0b90f2fece5"
         )
         .unwrap()
     );

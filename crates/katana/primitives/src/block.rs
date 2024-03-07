@@ -40,17 +40,19 @@ pub struct PartialHeader {
 }
 
 /// The L1 gas prices.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "UPPERCASE"))]
 pub struct GasPrices {
     /// The price of one unit of the given resource, denominated in wei
-    pub eth: u64,
-    /// The price of one unit of the given resource, denominated in strk
-    pub strk: u64,
+    pub eth: u128,
+    /// The price of one unit of the given resource, denominated in fri (the smallest unit of STRK,
+    /// equivalent to 10^-18 STRK)
+    pub strk: u128,
 }
 
 impl GasPrices {
-    pub fn new(eth_gas_price: u64, strk_gas_price: u64) -> Self {
+    pub fn new(eth_gas_price: u128, strk_gas_price: u128) -> Self {
         Self { eth: eth_gas_price, strk: strk_gas_price }
     }
 }
@@ -130,6 +132,15 @@ impl Block {
     /// Seals the block with a given hash.
     pub fn seal_with_hash(self, hash: BlockHash) -> SealedBlock {
         SealedBlock { header: SealedHeader { hash, header: self.header }, body: self.body }
+    }
+
+    /// Seals the block with a given block hash and status.
+    pub fn seal_with_hash_and_status(
+        self,
+        hash: BlockHash,
+        status: FinalityStatus,
+    ) -> SealedBlockWithStatus {
+        SealedBlockWithStatus { block: self.seal_with_hash(hash), status }
     }
 }
 

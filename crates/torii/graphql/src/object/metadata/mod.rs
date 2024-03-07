@@ -7,7 +7,7 @@ use sqlx::{Pool, Row, Sqlite};
 
 use super::connection::page_info::PageInfoObject;
 use super::connection::{connection_arguments, cursor, parse_connection_arguments};
-use super::ObjectTrait;
+use super::{BasicObject, ResolvableObject};
 use crate::constants::{
     ID_COLUMN, JSON_COLUMN, METADATA_NAMES, METADATA_TABLE, METADATA_TYPE_NAME,
 };
@@ -24,12 +24,12 @@ pub struct MetadataObject;
 impl MetadataObject {
     fn row_types(&self) -> TypeMapping {
         let mut row_types = self.type_mapping().clone();
-        row_types.remove("worldAddress");
+        row_types.swap_remove("worldAddress");
         row_types
     }
 }
 
-impl ObjectTrait for MetadataObject {
+impl BasicObject for MetadataObject {
     fn name(&self) -> (&str, &str) {
         METADATA_NAMES
     }
@@ -41,17 +41,10 @@ impl ObjectTrait for MetadataObject {
     fn type_mapping(&self) -> &TypeMapping {
         &METADATA_TYPE_MAPPING
     }
+}
 
-    fn table_name(&self) -> Option<&str> {
-        Some(METADATA_TABLE)
-    }
-
-    fn resolve_one(&self) -> Option<Field> {
-        None
-    }
-
-    fn resolve_many(&self) -> Option<Field> {
-        let table_name = self.table_name().unwrap().to_string();
+impl ResolvableObject for MetadataObject {
+    fn resolvers(&self) -> Vec<Field> {
         let row_types = self.row_types();
 
         let mut field = Field::new(
@@ -59,15 +52,14 @@ impl ObjectTrait for MetadataObject {
             TypeRef::named(format!("{}Connection", self.type_name())),
             move |ctx| {
                 let row_types = row_types.clone();
-                let table_name = table_name.to_string();
 
                 FieldFuture::new(async move {
                     let mut conn = ctx.data::<Pool<Sqlite>>()?.acquire().await?;
                     let connection = parse_connection_arguments(&ctx)?;
-                    let total_count = count_rows(&mut conn, &table_name, &None, &None).await?;
+                    let total_count = count_rows(&mut conn, METADATA_TABLE, &None, &None).await?;
                     let (data, page_info) = fetch_multiple_rows(
                         &mut conn,
-                        &table_name,
+                        METADATA_TABLE,
                         ID_COLUMN,
                         &None,
                         &None,
@@ -94,7 +86,7 @@ impl ObjectTrait for MetadataObject {
 
         field = connection_arguments(field);
 
-        Some(field)
+        vec![field]
     }
 }
 

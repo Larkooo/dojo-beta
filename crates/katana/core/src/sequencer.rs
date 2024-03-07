@@ -76,7 +76,9 @@ impl KatanaSequencer {
         let block_producer = if config.block_time.is_some() || config.no_mining {
             let block_num = backend.blockchain.provider().latest_number()?;
 
-            let block_env = backend.blockchain.provider().block_env_at(block_num.into())?.unwrap();
+            let mut block_env =
+                backend.blockchain.provider().block_env_at(block_num.into())?.unwrap();
+            backend.update_block_env(&mut block_env);
             let cfg_env = backend.chain_cfg_env();
 
             if let Some(interval) = config.block_time {
@@ -192,6 +194,7 @@ impl KatanaSequencer {
         &self,
         transactions: Vec<ExecutableTxWithHash>,
         block_id: BlockIdOrTag,
+        skip_validate: bool,
     ) -> SequencerResult<Vec<FeeEstimate>> {
         let state = self.state(&block_id)?;
 
@@ -199,11 +202,15 @@ impl KatanaSequencer {
             .block_execution_context_at(block_id)?
             .ok_or_else(|| SequencerError::BlockNotFound(block_id))?;
 
+        // If the node is run with transaction validation disabled, then we should not validate
+        // transactions when estimating the fee even if the `SKIP_VALIDATE` flag is not set.
+        let should_validate = !(skip_validate || self.backend.config.disable_validate);
+
         katana_executor::blockifier::utils::estimate_fee(
             transactions.into_iter(),
             block_context,
             state,
-            !self.backend.config.disable_validate,
+            should_validate,
         )
         .map_err(SequencerError::TransactionExecution)
     }
@@ -438,8 +445,8 @@ impl KatanaSequencer {
                     from_address: e.from_address.into(),
                     keys: e.keys.clone(),
                     data: e.data.clone(),
-                    block_hash,
-                    block_number: i,
+                    block_hash: Some(block_hash),
+                    block_number: Some(i),
                     transaction_hash: tx_hash,
                 }));
 
@@ -550,4 +557,33 @@ fn filter_events_by_params(
         }
     }
     (filtered_events, index)
+}
+
+#[cfg(test)]
+mod tests {
+    use katana_provider::traits::block::BlockNumberProvider;
+
+    use super::{KatanaSequencer, SequencerConfig};
+    use crate::backend::config::StarknetConfig;
+
+    #[tokio::test]
+    async fn init_interval_block_producer_with_correct_block_env() {
+        let sequencer = KatanaSequencer::new(
+            SequencerConfig { no_mining: true, ..Default::default() },
+            StarknetConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        let provider = sequencer.backend.blockchain.provider();
+
+        let latest_num = provider.latest_number().unwrap();
+        let producer_block_env = sequencer.pending_state().unwrap().block_execution_envs().0;
+
+        assert_eq!(
+            producer_block_env.number,
+            latest_num + 1,
+            "Pending block number should be latest block number + 1"
+        );
+    }
 }
