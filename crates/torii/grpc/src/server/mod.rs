@@ -270,6 +270,8 @@ impl DojoWorld {
             ),
         );
 
+        println!("count_query: {}", count_query);
+
         // total count of rows that matches keys_pattern without limit and offset
         let total_count =
             sqlx::query_scalar(&count_query).bind(&keys_pattern).fetch_one(&self.pool).await?;
