@@ -41,8 +41,6 @@ use crate::proto::world::{SubscribeEntitiesRequest, SubscribeEntityResponse};
 use crate::proto::{self};
 use crate::types::ComparisonOperator;
 
-mod tests;
-
 #[derive(Clone)]
 pub struct DojoWorld {
     pool: Pool<Sqlite>,
