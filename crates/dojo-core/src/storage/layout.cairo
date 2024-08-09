@@ -35,11 +35,19 @@ pub fn write_layout(
 /// * `values` - the model record values.
 /// * `offset` - the start of model record values in the `values` parameter.
 /// * `layout` - the model record layout.
+#[inline(always)]
 pub fn write_fixed_layout(
     model: felt252, key: felt252, values: Span<felt252>, ref offset: u32, layout: Span<u8>
 ) {
     database::set(model, key, values, offset, layout);
     offset += layout.len();
+}
+
+#[inline(always)]
+pub fn write_lobotomized(
+    model: felt252, key: felt252, value: felt252
+) {
+    database::set_lobotomized(model, key, value);
 }
 
 /// Write array layout model record to the world storage.

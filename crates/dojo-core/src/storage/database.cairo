@@ -42,6 +42,10 @@ fn get_storage_key(table: felt252, key: felt252) -> Span<felt252> {
     [DOJO_STORAGE, table, key].span()
 }
 
+pub fn get_lobotomized(table: felt252, key: felt252) -> felt252 {
+    storage::get(0, get_storage_key(table, key))
+}
+
 /// Read a record from a table, with its ID and layout.
 ///
 /// # Arguments
@@ -65,6 +69,11 @@ pub fn get(table: felt252, key: felt252, layout: Span<u8>) -> Span<felt252> {
 pub fn set(table: felt252, key: felt252, value: Span<felt252>, offset: u32, layout: Span<u8>) {
     let storage_key = get_storage_key(table, key);
     storage::set_many(0, storage_key, value, offset, layout).unwrap_syscall();
+}
+
+pub fn set_lobotomized(table: felt252, key: felt252, value: felt252) {
+    let storage_key = get_storage_key(table, key);
+    storage::set(0, storage_key, value);
 }
 
 /// delete a record from a table with its ID and layout.

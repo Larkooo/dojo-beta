@@ -33,6 +33,9 @@ pub trait IWorld<T> {
     fn uuid(ref self: T) -> usize;
     fn emit(self: @T, keys: Array<felt252>, values: Span<felt252>);
 
+    fn entity_lobotomized(
+        self: @T, model_selector: felt252, entity_id: felt252
+    ) -> felt252;
     fn entity(
         self: @T, model_selector: felt252, index: ModelIndex, layout: Layout
     ) -> Span<felt252>;
@@ -42,6 +45,13 @@ pub trait IWorld<T> {
         index: ModelIndex,
         values: Span<felt252>,
         layout: Layout
+    );
+    fn set_entity_lobotomized(
+        ref self: T,
+        model_selector: felt252,
+        keys: Span<felt252>,
+        entity_id: felt252,
+        value: felt252,
     );
     fn delete_entity(ref self: T, model_selector: felt252, index: ModelIndex, layout: Layout);
 
@@ -780,14 +790,13 @@ pub mod world {
             }
         }
 
-        /// Sets the model value for a model record/entity/member.
-        ///
-        /// # Arguments
-        ///
-        /// * `model_selector` - The selector of the model to be set.
-        /// * `index` - The index of the record/entity/member to write.
-        /// * `values` - The value to be set, serialized using the model layout format.
-        /// * `layout` - The memory layout of the model.
+        #[inline(always)]
+        fn entity_lobotomized(
+            self: @ContractState, model_selector: felt252, entity_id: felt252
+        ) -> felt252 {
+            storage::database::get_lobotomized(model_selector, entity_id)
+        }
+
         fn set_entity(
             ref self: ContractState,
             model_selector: felt252,
@@ -797,6 +806,32 @@ pub mod world {
         ) {
             self.assert_caller_model_write_access(model_selector);
             self.set_entity_internal(model_selector, index, values, layout);
+        }
+
+        /// Sets the model value for a model record/entity/member.
+        ///
+        /// # Arguments
+        ///
+        /// * `model_selector` - The selector of the model to be set.
+        /// * `index` - The index of the record/entity/member to write.
+        /// * `values` - The value to be set, serialized using the model layout format.
+        /// * `layout` - The memory layout of the model.
+        #[inline(always)]
+        fn set_entity_lobotomized(
+            ref self: ContractState,
+            model_selector: felt252,
+            keys: Span<felt252>,
+            entity_id: felt252,
+            value: felt252,
+        ) {
+            assert(
+                self.is_writer(model_selector, get_caller_address()), Errors::NO_MODEL_WRITE_ACCESS
+            );
+
+            storage::layout::write_lobotomized(
+                model_selector, entity_id, value
+            );
+            EventEmitter::emit(ref self, StoreSetRecord { table: model_selector, keys, values: array![value].span() });
         }
 
         /// Deletes a record/entity of a model..
