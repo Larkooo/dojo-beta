@@ -825,7 +825,7 @@ pub mod world {
             value: felt252,
         ) {
             assert(
-                self.is_writer(model_selector, get_caller_address())
+                self.is_writer(model_selector, get_caller_address()), 'no writer'
             );
 
             storage::layout::write_lobotomized(
