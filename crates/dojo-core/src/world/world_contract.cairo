@@ -54,6 +54,9 @@ pub trait IWorld<T> {
         value: felt252,
     );
     fn delete_entity(ref self: T, model_selector: felt252, index: ModelIndex, layout: Layout);
+    fn delete_entity_lobotomized(
+        ref self: T, model_selector: felt252, entity_id: felt252
+    );
 
     fn base(self: @T) -> ClassHash;
     fn resource(self: @T, selector: felt252) -> Resource;
@@ -847,6 +850,21 @@ pub mod world {
         ) {
             self.assert_caller_model_write_access(model_selector);
             self.delete_entity_internal(model_selector, index, layout);
+        }
+
+        fn delete_entity_lobotomized(
+            ref self: ContractState, model_selector: felt252, entity_id: felt252
+        ) {
+            assert(
+                self.is_writer(model_selector, get_caller_address()), 'no writer'
+            );
+
+            storage::layout::write_lobotomized(
+                model_selector, entity_id, value
+            );
+            EventEmitter::emit(
+                ref self, StoreDelRecord { table: model_selector, entity_id }
+            );
         }
 
         /// Gets the base contract class hash.
