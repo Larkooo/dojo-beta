@@ -33,9 +33,7 @@ pub trait IWorld<T> {
     fn uuid(ref self: T) -> usize;
     fn emit(self: @T, keys: Array<felt252>, values: Span<felt252>);
 
-    fn entity_lobotomized(
-        self: @T, model_selector: felt252, entity_id: felt252
-    ) -> felt252;
+    fn entity_lobotomized(self: @T, model_selector: felt252, entity_id: felt252) -> felt252;
     fn entity(
         self: @T, model_selector: felt252, index: ModelIndex, layout: Layout
     ) -> Span<felt252>;
@@ -54,9 +52,7 @@ pub trait IWorld<T> {
         value: felt252,
     );
     fn delete_entity(ref self: T, model_selector: felt252, index: ModelIndex, layout: Layout);
-    fn delete_entity_lobotomized(
-        ref self: T, model_selector: felt252, entity_id: felt252
-    );
+    fn delete_entity_lobotomized(ref self: T, model_selector: felt252, entity_id: felt252);
 
     fn base(self: @T) -> ClassHash;
     fn resource(self: @T, selector: felt252) -> Resource;
@@ -827,14 +823,13 @@ pub mod world {
             entity_id: felt252,
             value: felt252,
         ) {
-            assert(
-                self.is_writer(model_selector, get_caller_address()), 'no writer'
-            );
+            assert(self.is_writer(model_selector, get_caller_address()), 'no writer');
 
-            storage::layout::write_lobotomized(
-                model_selector, entity_id, value
+            storage::layout::write_lobotomized(model_selector, entity_id, value);
+            EventEmitter::emit(
+                ref self,
+                StoreSetRecord { table: model_selector, keys, values: array![value].span() }
             );
-            EventEmitter::emit(ref self, StoreSetRecord { table: model_selector, keys, values: array![value].span() });
         }
 
         /// Deletes a record/entity of a model..
@@ -855,16 +850,10 @@ pub mod world {
         fn delete_entity_lobotomized(
             ref self: ContractState, model_selector: felt252, entity_id: felt252
         ) {
-            assert(
-                self.is_writer(model_selector, get_caller_address()), 'no writer'
-            );
+            assert(self.is_writer(model_selector, get_caller_address()), 'no writer');
 
-            storage::layout::write_lobotomized(
-                model_selector, entity_id, value
-            );
-            EventEmitter::emit(
-                ref self, StoreDelRecord { table: model_selector, entity_id }
-            );
+            storage::layout::write_lobotomized(model_selector, entity_id, 0);
+            EventEmitter::emit(ref self, StoreDelRecord { table: model_selector, entity_id });
         }
 
         /// Gets the base contract class hash.
