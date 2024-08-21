@@ -115,6 +115,10 @@ struct Args {
     /// Enable indexing pending blocks
     #[arg(long)]
     index_pending: bool,
+
+    /// Polling interval for the engine
+    #[arg(long, default_value = "1000")]
+    poll_time: u64,
 }
 
 #[tokio::main]
@@ -188,6 +192,7 @@ async fn main() -> anyhow::Result<()> {
             start_block: args.start_block,
             events_chunk_size: args.events_chunk_size,
             index_pending: args.index_pending,
+            poll_time: args.poll_time,
             ..Default::default()
         },
         shutdown_tx.clone(),
