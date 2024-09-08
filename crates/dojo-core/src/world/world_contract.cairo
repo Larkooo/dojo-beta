@@ -828,7 +828,7 @@ pub mod world {
             storage::layout::write_lobotomized(model_selector, entity_id, value);
             EventEmitter::emit(
                 ref self,
-                StoreSetRecord { table: model_selector, keys, values: array![value].span() }
+                StoreSetRecord { table: model_selector, keys, values: array![value].span(), entity_id }
             );
         }
 
