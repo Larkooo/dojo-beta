@@ -79,6 +79,8 @@ impl From<SchemaError> for Error {
             SchemaError::ParseIntError(err) => ParseError::ParseIntError(err).into(),
             SchemaError::FromSlice(err) => ParseError::FromSlice(err).into(),
             SchemaError::FromStr(err) => ParseError::FromStr(err).into(),
+            SchemaError::IntegerOverflow(err) => ParseError::IntegerOverflow(err).into(),
+            SchemaError::ExpectedDataType(err) => ParseError::ExpectedDataType(err).into(),
         }
     }
 }

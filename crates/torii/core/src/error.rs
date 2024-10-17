@@ -35,6 +35,10 @@ pub enum ParseError {
     FromJsonStr(#[from] serde_json::Error),
     #[error(transparent)]
     FromSlice(#[from] std::array::TryFromSliceError),
+    #[error("Integer overflow: {0}")]
+    IntegerOverflow(String),
+    #[error("Expected data type: {0}")]
+    ExpectedDataType(String),
 }
 
 #[derive(Debug, thiserror::Error)]

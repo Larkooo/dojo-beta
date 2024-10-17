@@ -23,6 +23,10 @@ pub enum SchemaError {
     FromSlice(#[from] std::array::TryFromSliceError),
     #[error(transparent)]
     FromStr(#[from] FromStrError),
+    #[error("Expected data type: {0}")]
+    ExpectedDataType(String),
+    #[error("Integer overflow: {0}")]
+    IntegerOverflow(String),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Hash, Eq, Clone)]
@@ -68,7 +72,7 @@ impl proto::types::Ty {
                 if let Ty::Primitive(primitive) = ty {
                     *primitive = primitive_value.try_into()?;
                 } else {
-                    return Err(SchemaError::MissingExpectedData("primitive".to_string()));
+                    return Err(SchemaError::ExpectedDataType("primitive".to_string()));
                 }
             }
             proto::types::ty::TyType::Enum(enum_value) => {
@@ -78,7 +82,7 @@ impl proto::types::Ty {
                         ty.parse(&mut r#enum.options[enum_value.option as usize].ty)?;
                     }
                 } else {
-                    return Err(SchemaError::MissingExpectedData("enum".to_string()));
+                    return Err(SchemaError::ExpectedDataType("enum".to_string()));
                 }
             }
             proto::types::ty::TyType::Struct(struct_value) => {
@@ -89,7 +93,7 @@ impl proto::types::Ty {
                         ty.parse(&mut r#child.ty)?;
                     }
                 } else {
-                    return Err(SchemaError::MissingExpectedData("struct".to_string()));
+                    return Err(SchemaError::ExpectedDataType("struct".to_string()));
                 }
             }
             proto::types::ty::TyType::Tuple(tuple_value) => {
@@ -98,7 +102,7 @@ impl proto::types::Ty {
                         ty.parse(r#child)?;
                     }
                 } else {
-                    return Err(SchemaError::MissingExpectedData("tuple".to_string()));
+                    return Err(SchemaError::ExpectedDataType("tuple".to_string()));
                 }
             }
             proto::types::ty::TyType::Array(array_value) => {
@@ -111,14 +115,14 @@ impl proto::types::Ty {
                         array.push(element);
                     }
                 } else {
-                    return Err(SchemaError::MissingExpectedData("array".to_string()));
+                    return Err(SchemaError::ExpectedDataType("array".to_string()));
                 }
             }
             proto::types::ty::TyType::Bytearray(bytearray_value) => {
                 if let Ty::ByteArray(bytearray) = ty {
                     *bytearray = bytearray_value;
                 } else {
-                    return Err(SchemaError::MissingExpectedData("bytearray".to_string()));
+                    return Err(SchemaError::ExpectedDataType("bytearray".to_string()));
                 }
             }
         }
@@ -180,16 +184,28 @@ impl TryFrom<proto::types::Primitive> for Primitive {
 
         let primitive = match &value {
             proto::types::primitive::PrimitiveType::Bool(bool) => Primitive::Bool(Some(*bool)),
-            proto::types::primitive::PrimitiveType::I8(int) => Primitive::I8(Some(*int as i8)),
-            proto::types::primitive::PrimitiveType::I16(int) => Primitive::I16(Some(*int as i16)),
-            proto::types::primitive::PrimitiveType::I32(int) => Primitive::I32(Some(*int as i32)),
-            proto::types::primitive::PrimitiveType::I64(int) => Primitive::I64(Some(*int as i64)),
+            proto::types::primitive::PrimitiveType::I8(int) => Primitive::I8(Some(
+                i8::try_from(*int)
+                    .map_err(|_| SchemaError::IntegerOverflow(format!("i8: {}", *int)))?,
+            )),
+            proto::types::primitive::PrimitiveType::I16(int) => Primitive::I16(Some(
+                i16::try_from(*int)
+                    .map_err(|_| SchemaError::IntegerOverflow(format!("i16: {}", *int)))?,
+            )),
+            proto::types::primitive::PrimitiveType::I32(int) => Primitive::I32(Some(*int)),
+            proto::types::primitive::PrimitiveType::I64(int) => Primitive::I64(Some(*int)),
             proto::types::primitive::PrimitiveType::I128(bytes) => Primitive::I128(Some(
                 i128::from_be_bytes(bytes.as_slice().try_into().map_err(SchemaError::FromSlice)?),
             )),
-            proto::types::primitive::PrimitiveType::U8(int) => Primitive::U8(Some(*int as u8)),
-            proto::types::primitive::PrimitiveType::U16(int) => Primitive::U16(Some(*int as u16)),
-            proto::types::primitive::PrimitiveType::U32(int) => Primitive::U32(Some(*int as u32)),
+            proto::types::primitive::PrimitiveType::U8(int) => Primitive::U8(Some(
+                u8::try_from(*int)
+                    .map_err(|_| SchemaError::IntegerOverflow(format!("u8: {}", *int)))?,
+            )),
+            proto::types::primitive::PrimitiveType::U16(int) => Primitive::U16(Some(
+                u16::try_from(*int)
+                    .map_err(|_| SchemaError::IntegerOverflow(format!("u16: {}", *int)))?,
+            )),
+            proto::types::primitive::PrimitiveType::U32(int) => Primitive::U32(Some(*int)),
             proto::types::primitive::PrimitiveType::U64(int) => Primitive::U64(Some(*int)),
             proto::types::primitive::PrimitiveType::U128(bytes) => Primitive::U128(Some(
                 u128::from_be_bytes(bytes.as_slice().try_into().map_err(SchemaError::FromSlice)?),
