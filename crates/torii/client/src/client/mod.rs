@@ -13,7 +13,9 @@ use starknet::providers::jsonrpc::HttpTransport;
 use starknet::providers::JsonRpcClient;
 use tokio::sync::RwLock as AsyncRwLock;
 use torii_grpc::client::{EventUpdateStreaming, IndexerUpdateStreaming};
-use torii_grpc::proto::world::{RetrieveEntitiesResponse, RetrieveEventsResponse, SubscribeEntityResponse};
+use torii_grpc::proto::world::{
+    RetrieveEntitiesResponse, RetrieveEventsResponse, SubscribeEntityResponse,
+};
 use torii_grpc::types::schema::Entity;
 use torii_grpc::types::{EntityKeysClause, Event, EventQuery, KeysClause, Query};
 use torii_relay::client::EventLoop;
@@ -130,7 +132,9 @@ impl Client {
         Ok(EntityUpdateStreaming(stream.map_ok(Box::new(move |res| {
             res.entity.map_or(
                 (res.subscription_id, Entity { hashed_keys: Felt::ZERO, models: vec![] }),
-                |entity| (res.subscription_id, entity.map(&models).expect("must able to serialize"))
+                |entity| {
+                    (res.subscription_id, entity.map(&models).expect("must able to serialize"))
+                },
             )
         }))))
     }
@@ -158,7 +162,9 @@ impl Client {
         Ok(EntityUpdateStreaming(stream.map_ok(Box::new(move |res| {
             res.entity.map_or(
                 (res.subscription_id, Entity { hashed_keys: Felt::ZERO, models: vec![] }),
-                |entity| (res.subscription_id, entity.map(&models).expect("must able to serialize"))
+                |entity| {
+                    (res.subscription_id, entity.map(&models).expect("must able to serialize"))
+                },
             )
         }))))
     }

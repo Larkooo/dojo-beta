@@ -14,9 +14,8 @@ use crate::proto::world::{
     RetrieveEventsResponse, SubscribeEntitiesRequest, SubscribeEntityResponse,
     SubscribeEventsRequest, SubscribeEventsResponse, SubscribeIndexerRequest,
     SubscribeIndexerResponse, SubscribeModelsRequest, SubscribeModelsResponse,
-    UpdateEntitiesSubscriptionRequest, WorldMetadataRequest
+    UpdateEntitiesSubscriptionRequest, WorldMetadataRequest,
 };
-
 use crate::types::schema::SchemaError;
 use crate::types::{
     EntityKeysClause, Event, EventQuery, IndexerUpdate, KeysClause, ModelKeysClause, Query,
