@@ -5,13 +5,15 @@ use std::sync::Arc;
 use dojo_types::WorldMetadata;
 use dojo_world::contracts::WorldContractReader;
 use futures::lock::Mutex;
+use futures::stream::MapOk;
+use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::{RwLock, RwLockReadGuard};
 use starknet::core::types::Felt;
 use starknet::providers::jsonrpc::HttpTransport;
 use starknet::providers::JsonRpcClient;
 use tokio::sync::RwLock as AsyncRwLock;
-use torii_grpc::client::{EntityUpdateStreaming, EventUpdateStreaming, IndexerUpdateStreaming};
-use torii_grpc::proto::world::{RetrieveEntitiesResponse, RetrieveEventsResponse};
+use torii_grpc::client::{EventUpdateStreaming, IndexerUpdateStreaming};
+use torii_grpc::proto::world::{RetrieveEntitiesResponse, RetrieveEventsResponse, SubscribeEntityResponse};
 use torii_grpc::types::schema::Entity;
 use torii_grpc::types::{EntityKeysClause, Event, EventQuery, KeysClause, Query};
 use torii_relay::client::EventLoop;
@@ -95,7 +97,8 @@ impl Client {
         let mut grpc_client = self.inner.write().await;
         let RetrieveEntitiesResponse { entities, total_count: _ } =
             grpc_client.retrieve_entities(query).await?;
-        Ok(entities.into_iter().map(TryInto::try_into).collect::<Result<Vec<Entity>, _>>()?)
+        let models = &self.metadata().models;
+        Ok(entities.into_iter().map(|e| e.map(models)).collect::<Result<Vec<Entity>, _>>()?)
     }
 
     /// Similary to entities, this function retrieves event messages matching the query parameter.
@@ -103,7 +106,8 @@ impl Client {
         let mut grpc_client = self.inner.write().await;
         let RetrieveEntitiesResponse { entities, total_count: _ } =
             grpc_client.retrieve_event_messages(query).await?;
-        Ok(entities.into_iter().map(TryInto::try_into).collect::<Result<Vec<Entity>, _>>()?)
+        let models = &self.metadata().models;
+        Ok(entities.into_iter().map(|e| e.map(models)).collect::<Result<Vec<Entity>, _>>()?)
     }
 
     /// Retrieve raw starknet events matching the keys provided.
@@ -121,7 +125,14 @@ impl Client {
     ) -> Result<EntityUpdateStreaming, Error> {
         let mut grpc_client = self.inner.write().await;
         let stream = grpc_client.subscribe_entities(clauses).await?;
-        Ok(stream)
+        let models = self.metadata().models.clone();
+
+        Ok(EntityUpdateStreaming(stream.map_ok(Box::new(move |res| {
+            res.entity.map_or(
+                (res.subscription_id, Entity { hashed_keys: Felt::ZERO, models: vec![] }),
+                |entity| (res.subscription_id, entity.map(&models).expect("must able to serialize"))
+            )
+        }))))
     }
 
     /// Update the entities subscription
@@ -142,7 +153,14 @@ impl Client {
     ) -> Result<EntityUpdateStreaming, Error> {
         let mut grpc_client = self.inner.write().await;
         let stream = grpc_client.subscribe_event_messages(clauses).await?;
-        Ok(stream)
+        let models = self.metadata().models.clone();
+
+        Ok(EntityUpdateStreaming(stream.map_ok(Box::new(move |res| {
+            res.entity.map_or(
+                (res.subscription_id, Entity { hashed_keys: Felt::ZERO, models: vec![] }),
+                |entity| (res.subscription_id, entity.map(&models).expect("must able to serialize"))
+            )
+        }))))
     }
 
     /// Update the event messages subscription
@@ -177,5 +195,24 @@ impl Client {
             .subscribe_indexer(contract_address.unwrap_or(self.world_reader.address))
             .await?;
         Ok(stream)
+    }
+}
+
+type SubscriptionId = u64;
+type EntityMappedStream = MapOk<
+    tonic::Streaming<SubscribeEntityResponse>,
+    Box<dyn Fn(SubscribeEntityResponse) -> (SubscriptionId, Entity) + Send>,
+>;
+
+#[derive(Debug)]
+pub struct EntityUpdateStreaming(EntityMappedStream);
+
+impl Stream for EntityUpdateStreaming {
+    type Item = <EntityMappedStream as Stream>::Item;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.poll_next_unpin(cx)
     }
 }

@@ -29,11 +29,16 @@ message ModelMetadata {
     string contract_address = 8;
 }
 
+message Model {
+    string name = 1;
+    repeated Ty children = 2;
+}
+
 message Entity {
     // The entity's hashed keys
     bytes hashed_keys = 1;
     // Models of the entity
-    repeated Struct models = 2;
+    repeated Model models = 2;
 }
 
 message Event {

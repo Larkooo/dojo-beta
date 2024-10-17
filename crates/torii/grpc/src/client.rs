@@ -7,15 +7,17 @@ use starknet::core::types::{Felt, FromStrError, StateDiff, StateUpdate};
 use tonic::codec::CompressionEncoding;
 #[cfg(not(target_arch = "wasm32"))]
 use tonic::transport::Endpoint;
+use tonic::Streaming;
 
 use crate::proto::world::{
     world_client, RetrieveEntitiesRequest, RetrieveEntitiesResponse, RetrieveEventsRequest,
     RetrieveEventsResponse, SubscribeEntitiesRequest, SubscribeEntityResponse,
     SubscribeEventsRequest, SubscribeEventsResponse, SubscribeIndexerRequest,
     SubscribeIndexerResponse, SubscribeModelsRequest, SubscribeModelsResponse,
-    UpdateEntitiesSubscriptionRequest, WorldMetadataRequest,
+    UpdateEntitiesSubscriptionRequest, WorldMetadataRequest
 };
-use crate::types::schema::{Entity, SchemaError};
+
+use crate::types::schema::SchemaError;
 use crate::types::{
     EntityKeysClause, Event, EventQuery, IndexerUpdate, KeysClause, ModelKeysClause, Query,
 };
@@ -135,7 +137,7 @@ impl WorldClient {
     pub async fn subscribe_entities(
         &mut self,
         clauses: Vec<EntityKeysClause>,
-    ) -> Result<EntityUpdateStreaming, Error> {
+    ) -> Result<Streaming<SubscribeEntityResponse>, Error> {
         let clauses = clauses.into_iter().map(|c| c.into()).collect();
         let stream = self
             .inner
@@ -144,12 +146,7 @@ impl WorldClient {
             .map_err(Error::Grpc)
             .map(|res| res.into_inner())?;
 
-        Ok(EntityUpdateStreaming(stream.map_ok(Box::new(|res| {
-            res.entity.map_or(
-                (res.subscription_id, Entity { hashed_keys: Felt::ZERO, models: vec![] }),
-                |entity| (res.subscription_id, entity.try_into().expect("must able to serialize")),
-            )
-        }))))
+        Ok(stream)
     }
 
     /// Update an entities subscription.
@@ -174,7 +171,7 @@ impl WorldClient {
     pub async fn subscribe_event_messages(
         &mut self,
         clauses: Vec<EntityKeysClause>,
-    ) -> Result<EntityUpdateStreaming, Error> {
+    ) -> Result<Streaming<SubscribeEntityResponse>, Error> {
         let clauses = clauses.into_iter().map(|c| c.into()).collect();
         let stream = self
             .inner
@@ -183,12 +180,7 @@ impl WorldClient {
             .map_err(Error::Grpc)
             .map(|res| res.into_inner())?;
 
-        Ok(EntityUpdateStreaming(stream.map_ok(Box::new(|res| {
-            res.entity.map_or(
-                (res.subscription_id, Entity { hashed_keys: Felt::ZERO, models: vec![] }),
-                |entity| (res.subscription_id, entity.try_into().expect("must able to serialize")),
-            )
-        }))))
+        Ok(stream)
     }
 
     /// Update an event messages subscription.
@@ -261,25 +253,6 @@ pub struct ModelDiffsStreaming(ModelDiffMappedStream);
 
 impl Stream for ModelDiffsStreaming {
     type Item = <ModelDiffMappedStream as Stream>::Item;
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.0.poll_next_unpin(cx)
-    }
-}
-
-type SubscriptionId = u64;
-type EntityMappedStream = MapOk<
-    tonic::Streaming<SubscribeEntityResponse>,
-    Box<dyn Fn(SubscribeEntityResponse) -> (SubscriptionId, Entity) + Send>,
->;
-
-#[derive(Debug)]
-pub struct EntityUpdateStreaming(EntityMappedStream);
-
-impl Stream for EntityUpdateStreaming {
-    type Item = <EntityMappedStream as Stream>::Item;
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,

@@ -1,15 +1,9 @@
 syntax = "proto3";
 package types;
 
-message EnumOption {
-    string name = 1;
-    Ty ty = 2;
-}
-
 message Enum {
-    string name = 1;
-    uint32 option = 2;
-    repeated EnumOption options = 3;
+    uint32 option = 1;
+    Ty ty = 2;
 }
 
 message Primitive {
@@ -33,11 +27,6 @@ message Primitive {
     }
 }
 
-message Struct {
-    string name = 1;
-    repeated Member children = 2;
-}
-
 message Array {
     repeated Ty children = 1;
 }
@@ -46,15 +35,9 @@ message Ty {
     oneof ty_type {
         Primitive primitive = 2;
         Enum enum = 3;
-        Struct struct = 4;
+        Array struct = 4;
         Array tuple = 5;
         Array array = 6;
         string bytearray = 7;
     }
-}
-
-message Member {
-    string name = 1;
-    Ty ty = 2;
-    bool key = 3;
 }
