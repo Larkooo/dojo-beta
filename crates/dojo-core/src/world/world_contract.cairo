@@ -832,6 +832,19 @@ pub mod world {
             );
         }
 
+        #[inline(always)]
+        fn update_entity_lobotomized(
+            ref self: ContractState, model_selector: felt252, entity_id: felt252, value: felt252
+        ) {
+            assert(self.is_writer(model_selector, get_caller_address()), 'no writer');
+
+            storage::layout::write_lobotomized(model_selector, entity_id, value);
+            EventEmitter::emit(
+                ref self,
+                StoreUpdateRecord { table: model_selector, values: array![value].span(), entity_id }
+            );
+        }
+
         /// Deletes a record/entity of a model..
         /// Deleting is setting all the values to 0 in the given layout.
         ///
