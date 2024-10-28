@@ -51,6 +51,9 @@ pub trait IWorld<T> {
         entity_id: felt252,
         value: felt252,
     );
+    fn update_entity_lobotomized(
+        ref self: T, model_selector: felt252, entity_id: felt252, value: felt252
+    );
     fn delete_entity(ref self: T, model_selector: felt252, index: ModelIndex, layout: Layout);
     fn delete_entity_lobotomized(ref self: T, model_selector: felt252, entity_id: felt252);
 
