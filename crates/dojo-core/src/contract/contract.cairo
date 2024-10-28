@@ -1,6 +1,6 @@
 #[starknet::interface]
 pub trait IContract<T> {
-    fn name(self: @T) -> ByteArray;
+    fn dojo_name(self: @T) -> ByteArray;
     fn namespace(self: @T) -> ByteArray;
     fn tag(self: @T) -> ByteArray;
     fn name_hash(self: @T) -> felt252;

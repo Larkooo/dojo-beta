@@ -645,7 +645,7 @@ pub mod world {
 
             let dispatcher = IContractDispatcher { contract_address };
             let namespace = dispatcher.namespace();
-            let name = dispatcher.name();
+            let name = dispatcher.dojo_name();
             let namespace_hash = dispatcher.namespace_hash();
 
             if !self.is_namespace_registered(namespace_hash) {
